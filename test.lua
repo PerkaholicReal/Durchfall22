@@ -1,164 +1,79 @@
---[[
-    Matcha Player Name Display Test - COMPLETE FIXED SCRIPT
-    Uses only confirmed working Matcha features
-    Note: Drawing "Text" has known bug - if names don't render, use notify version below
-]]
-
+loadstring([[
 local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
--- Configuration
-local SHOW_DISTANCE = 150
-local UPDATE_RATE = 0.05
-local TAG_Y_OFFSET = 2.5
-
--- Drawing pool
-local PlayerTags = {}
-local activePlayers = {}
-
--- Create a name tag for a player
-local function createTag(playerName)
-    local text = Drawing.new("Text")
-    text.Size = 14
-    text.Font = Drawing.Fonts.SystemBold
-    text.Color = Color3.fromRGB(255, 255, 255)
-    text.Outline = true
-    text.OutlineColor = Color3.fromRGB(0, 0, 0)
-    text.Center = true
-    text.Visible = false
-    return text
-end
-
--- Get player's head position
-local function getHeadPosition(player)
-    local char = player.Character
-    if not char then return nil end
-    
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local head = char:FindFirstChild("Head")
-    
-    if head then
-        return head.Position
-    elseif hrp then
-        return hrp.Position + Vector3.new(0, TAG_Y_OFFSET, 0)
-    end
-    return nil
-end
-
--- Update a single player's tag
-local function updateTag(player, tag)
-    local LocalPlayer = Players.LocalPlayer
-    if not LocalPlayer then
-        tag.Visible = false
-        return
-    end
-    
-    if not player or player == LocalPlayer then
-        tag.Visible = false
-        return
-    end
-    
-    local char = player.Character
-    if not char or not char.Parent then
-        tag.Visible = false
-        return
-    end
-    
-    local headPos = getHeadPosition(player)
-    if not headPos then
-        tag.Visible = false
-        return
-    end
-    
-    local localChar = LocalPlayer.Character
-    local localPos = localChar and localChar:FindFirstChild("HumanoidRootPart")
-    if localPos then
-        local dx = headPos.X - localPos.Position.X
-        local dy = headPos.Y - localPos.Position.Y
-        local dz = headPos.Z - localPos.Position.Z
-        local distSq = dx*dx + dy*dy + dz*dz
-        if distSq > (SHOW_DISTANCE * SHOW_DISTANCE) then
-            tag.Visible = false
-            return
-        end
-    end
-    
-    local ok, screenPos, onScreen = pcall(WorldToScreen, headPos)
-    if not ok or not onScreen then
-        tag.Visible = false
-        return
-    end
-    
-    tag.Position = Vector2.new(math.floor(screenPos.X + 0.5), math.floor(screenPos.Y - 25 + 0.5))
-    tag.Text = player.Name
-    
-    local okDisplay, displayName = pcall(function() return player.DisplayName end)
-    if okDisplay and displayName and displayName ~= player.Name then
-        tag.Text = player.Name .. " (" .. displayName .. ")"
-    end
-    
-    local okTeam, team = pcall(function() return player.Team end)
-    if okTeam and team then
-        local okColor, teamColor = pcall(function() return team.TeamColor.Color end)
-        if okColor and teamColor then
-            tag.Color = teamColor
-        else
-            tag.Color = Color3.fromRGB(255, 255, 255)
-        end
-    else
-        tag.Color = Color3.fromRGB(255, 255, 255)
-    end
-    
-    tag.Visible = true
-end
-
-local function cleanup()
-    for name, tag in pairs(PlayerTags) do
-        if not activePlayers[name] then
-            pcall(function() tag:Remove() end)
-            PlayerTags[name] = nil
-        end
-    end
-end
-
-local running = true
+-- Scan for nearby players every 5 seconds
 task.spawn(function()
-    while running do
-        task.wait(UPDATE_RATE)
+    while true do
+        task.wait(5)
         
         local LocalPlayer = Players.LocalPlayer
-        if LocalPlayer then
-            local currentPlayers = Players:GetPlayers()
-            activePlayers = {}
-            for _, player in ipairs(currentPlayers) do
-                activePlayers[player.Name] = player
-            end
-            
-            for _, player in ipairs(currentPlayers) do
-                if player ~= LocalPlayer and not PlayerTags[player.Name] then
-                    PlayerTags[player.Name] = createTag(player.Name)
+        if not LocalPlayer then continue end
+        
+        local localChar = LocalPlayer.Character
+        if not localChar then continue end
+        
+        local localPos = localChar:FindFirstChild("HumanoidRootPart")
+        if not localPos then continue end
+        
+        local nearby = {}
+        
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local char = player.Character
+                if char then
+                    local hrp = char:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local dx = hrp.Position.X - localPos.Position.X
+                        local dz = hrp.Position.Z - localPos.Position.Z
+                        local dist = math.sqrt(dx*dx + dz*dz)
+                        
+                        -- Get health from stat folder (game-specific)
+                        local health = "?"
+                        local statFolder = player:FindFirstChild("stat")
+                        if statFolder then
+                            local healthVal = statFolder:FindFirstChild("health")
+                            if healthVal then
+                                health = tostring(healthVal.Value)
+                            end
+                        end
+                        
+                        if dist < 100 then
+                            table.insert(nearby, player.Name .. " [HP:" .. health .. "] (" .. math.floor(dist) .. ")")
+                        end
+                    end
                 end
             end
-            
-            for name, player in pairs(activePlayers) do
-                local tag = PlayerTags[name]
-                if tag then
-                    updateTag(player, tag)
-                end
-            end
-            
-            cleanup()
+        end
+        
+        if #nearby > 0 then
+            notify("Nearby: " .. table.concat(nearby, ", "), "Players", 4)
         end
     end
 end)
 
-local function onPlayerRemoving(player)
-    local tag = PlayerTags[player.Name]
-    if tag then
-        pcall(function() tag:Remove() end)
-        PlayerTags[player.Name] = nil
+-- Also show all players with their health on command (press H)
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if iskeypressed(0x48) then  -- H key
+            local playerList = {}
+            for _, player in ipairs(Players:GetPlayers()) do
+                local health = "?"
+                local statFolder = player:FindFirstChild("stat")
+                if statFolder then
+                    local healthVal = statFolder:FindFirstChild("health")
+                    if healthVal then
+                        health = tostring(healthVal.Value)
+                    end
+                end
+                table.insert(playerList, player.Name .. " [HP:" .. health .. "]")
+            end
+            notify(table.concat(playerList, ", "), "All Players (" .. #playerList .. ")", 5)
+            task.wait(0.5)  -- debounce
+        end
     end
-end
+end)
 
-Players.PlayerRemoving:Connect(onPlayerRemoving)
-
-notify("Player name display loaded - Drawing Text may be buggy in some Matcha versions", "Matcha", 4)
+notify("Player scanner loaded! Shows nearby every 5s, press H for all players", "Matcha", 5)
+]])()
